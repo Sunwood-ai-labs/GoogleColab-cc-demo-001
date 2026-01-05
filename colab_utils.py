@@ -7,8 +7,9 @@ including environment detection, setup, and file operations.
 
 import os
 import sys
+import subprocess
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Union
 from urllib.request import urlretrieve
 from urllib.error import URLError, HTTPError
 
@@ -212,6 +213,239 @@ def download_from_url(
         raise IOError(f"Failed to save file to {destination_path}: {e}")
 
 
+def format_file_size(size_bytes: Union[int, float]) -> str:
+    """
+    Convert file size in bytes to human-readable format.
+
+    This function converts a numeric file size to a human-readable string
+    with appropriate unit suffix (B, KB, MB, GB, TB).
+
+    Args:
+        size_bytes: The file size in bytes. Must be a non-negative number.
+
+    Returns:
+        str: Human-readable file size string (e.g., "1.50 MB", "2.30 GB").
+
+    Raises:
+        ValueError: If size_bytes is negative.
+        TypeError: If size_bytes is not a number.
+
+    Examples:
+        >>> format_file_size(1024)
+        '1.00 KB'
+        >>> format_file_size(1536)
+        '1.50 KB'
+        >>> format_file_size(1048576)
+        '1.00 MB'
+        >>> format_file_size(0)
+        '0 B'
+
+    Notes:
+        - Uses binary units (1 KB = 1024 bytes)
+        - Returns up to 2 decimal places for sizes >= 1 KB
+        - Returns integer format for bytes (< 1 KB)
+    """
+    if not isinstance(size_bytes, (int, float)):
+        raise TypeError(f"size_bytes must be a number, got {type(size_bytes).__name__}")
+
+    if size_bytes < 0:
+        raise ValueError("size_bytes must be non-negative")
+
+    if size_bytes == 0:
+        return "0 B"
+
+    units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+    unit_index = 0
+    size = float(size_bytes)
+
+    while size >= 1024 and unit_index < len(units) - 1:
+        size /= 1024
+        unit_index += 1
+
+    if unit_index == 0:
+        return f"{int(size)} B"
+    return f"{size:.2f} {units[unit_index]}"
+
+
+def get_gpu_info() -> Dict[str, Any]:
+    """
+    Get GPU information for the current environment.
+
+    This function retrieves GPU information using nvidia-smi command.
+    Useful for checking GPU availability and specifications in Colab.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing GPU information with keys:
+            - 'available': Whether GPU is available (bool)
+            - 'count': Number of GPUs (int)
+            - 'devices': List of device information dicts, each containing:
+                - 'index': GPU index
+                - 'name': GPU model name
+                - 'memory_total': Total memory in MB
+                - 'memory_used': Used memory in MB (if available)
+                - 'memory_free': Free memory in MB (if available)
+            - 'driver_version': NVIDIA driver version (if available)
+            - 'error': Error message if GPU detection failed (only present on error)
+
+    Examples:
+        >>> gpu_info = get_gpu_info()
+        >>> if gpu_info['available']:
+        ...     print(f"GPU: {gpu_info['devices'][0]['name']}")
+        ...     print(f"Memory: {gpu_info['devices'][0]['memory_total']} MB")
+        ... else:
+        ...     print("No GPU available")
+
+    Notes:
+        - Requires nvidia-smi to be installed and accessible
+        - Safe to call in environments without GPU (returns available=False)
+        - In Colab, use this to verify GPU runtime is enabled
+    """
+    result: Dict[str, Any] = {
+        'available': False,
+        'count': 0,
+        'devices': [],
+    }
+
+    try:
+        # Check if nvidia-smi is available
+        nvidia_smi_output = subprocess.run(
+            ['nvidia-smi', '--query-gpu=index,name,memory.total,memory.used,memory.free,driver_version',
+             '--format=csv,noheader,nounits'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if nvidia_smi_output.returncode != 0:
+            result['error'] = "nvidia-smi command failed"
+            return result
+
+        lines = nvidia_smi_output.stdout.strip().split('\n')
+        devices = []
+
+        for line in lines:
+            if not line.strip():
+                continue
+            parts = [p.strip() for p in line.split(',')]
+            if len(parts) >= 6:
+                device = {
+                    'index': int(parts[0]),
+                    'name': parts[1],
+                    'memory_total': int(float(parts[2])),
+                    'memory_used': int(float(parts[3])),
+                    'memory_free': int(float(parts[4])),
+                }
+                devices.append(device)
+                # Driver version is same for all GPUs, take from first
+                if 'driver_version' not in result:
+                    result['driver_version'] = parts[5]
+
+        if devices:
+            result['available'] = True
+            result['count'] = len(devices)
+            result['devices'] = devices
+
+    except FileNotFoundError:
+        result['error'] = "nvidia-smi not found (no NVIDIA GPU or drivers not installed)"
+    except subprocess.TimeoutExpired:
+        result['error'] = "nvidia-smi command timed out"
+    except Exception as e:
+        result['error'] = f"Failed to get GPU info: {str(e)}"
+
+    return result
+
+
+def get_memory_info() -> Dict[str, Any]:
+    """
+    Get system memory information.
+
+    This function retrieves RAM usage information from /proc/meminfo on Linux
+    or uses alternative methods for other platforms.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing memory information with keys:
+            - 'total_bytes': Total RAM in bytes
+            - 'available_bytes': Available RAM in bytes
+            - 'used_bytes': Used RAM in bytes
+            - 'percent_used': Memory usage percentage (0-100)
+            - 'total_formatted': Human-readable total memory
+            - 'available_formatted': Human-readable available memory
+            - 'used_formatted': Human-readable used memory
+            - 'platform': Platform identifier
+            - 'error': Error message (only present if detection failed)
+
+    Examples:
+        >>> mem_info = get_memory_info()
+        >>> print(f"Memory Usage: {mem_info['percent_used']:.1f}%")
+        >>> print(f"Available: {mem_info['available_formatted']}")
+
+    Notes:
+        - On Linux (including Colab), reads from /proc/meminfo
+        - Falls back to basic info on unsupported platforms
+        - Useful for monitoring memory in long-running Colab notebooks
+    """
+    result: Dict[str, Any] = {
+        'platform': sys.platform,
+    }
+
+    try:
+        if sys.platform.startswith('linux'):
+            # Read from /proc/meminfo on Linux
+            meminfo: Dict[str, int] = {}
+            with open('/proc/meminfo', 'r') as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        key = parts[0].rstrip(':')
+                        # Values in /proc/meminfo are in kB
+                        value = int(parts[1]) * 1024  # Convert to bytes
+                        meminfo[key] = value
+
+            total = meminfo.get('MemTotal', 0)
+            available = meminfo.get('MemAvailable', meminfo.get('MemFree', 0))
+            used = total - available
+
+            result['total_bytes'] = total
+            result['available_bytes'] = available
+            result['used_bytes'] = used
+            result['percent_used'] = (used / total * 100) if total > 0 else 0
+            result['total_formatted'] = format_file_size(total)
+            result['available_formatted'] = format_file_size(available)
+            result['used_formatted'] = format_file_size(used)
+
+        else:
+            # Fallback for non-Linux platforms
+            result['error'] = f"Memory info not fully supported on {sys.platform}"
+            result['total_bytes'] = 0
+            result['available_bytes'] = 0
+            result['used_bytes'] = 0
+            result['percent_used'] = 0
+            result['total_formatted'] = "N/A"
+            result['available_formatted'] = "N/A"
+            result['used_formatted'] = "N/A"
+
+    except FileNotFoundError:
+        result['error'] = "/proc/meminfo not found"
+        result['total_bytes'] = 0
+        result['available_bytes'] = 0
+        result['used_bytes'] = 0
+        result['percent_used'] = 0
+        result['total_formatted'] = "N/A"
+        result['available_formatted'] = "N/A"
+        result['used_formatted'] = "N/A"
+    except Exception as e:
+        result['error'] = f"Failed to get memory info: {str(e)}"
+        result['total_bytes'] = 0
+        result['available_bytes'] = 0
+        result['used_bytes'] = 0
+        result['percent_used'] = 0
+        result['total_formatted'] = "N/A"
+        result['available_formatted'] = "N/A"
+        result['used_formatted'] = "N/A"
+
+    return result
+
+
 if __name__ == "__main__":
     # Simple demonstration
     print("Colab Utils Demonstration")
@@ -226,6 +460,30 @@ if __name__ == "__main__":
     env_info = setup_colab_environment(verbose=False)
     for key, value in env_info.items():
         print(f"   {key}: {value}")
+
+    # File size formatting
+    print(f"\n3. File Size Formatting:")
+    test_sizes = [0, 512, 1024, 1536, 1048576, 1073741824]
+    for size in test_sizes:
+        print(f"   {size} bytes -> {format_file_size(size)}")
+
+    # GPU info
+    print(f"\n4. GPU Information:")
+    gpu_info = get_gpu_info()
+    print(f"   Available: {gpu_info['available']}")
+    if gpu_info['available']:
+        for device in gpu_info['devices']:
+            print(f"   GPU {device['index']}: {device['name']}")
+            print(f"   Memory: {device['memory_total']} MB")
+    elif 'error' in gpu_info:
+        print(f"   Note: {gpu_info['error']}")
+
+    # Memory info
+    print(f"\n5. Memory Information:")
+    mem_info = get_memory_info()
+    print(f"   Total: {mem_info['total_formatted']}")
+    print(f"   Available: {mem_info['available_formatted']}")
+    print(f"   Used: {mem_info['used_formatted']} ({mem_info['percent_used']:.1f}%)")
 
     print("\n" + "-" * 50)
     print("All utility functions are ready to use!")

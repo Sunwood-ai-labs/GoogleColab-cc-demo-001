@@ -5,6 +5,119 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-01-05
+
+### Added
+
+#### New Utility Functions
+
+- **`format_file_size()`**: Human-readable file size formatting utility
+  - Converts bytes to KB, MB, GB, TB, PB with 2 decimal precision
+  - Input validation for negative values and non-numeric types
+  - Uses binary units (1 KB = 1024 bytes)
+  - Useful for displaying download sizes and file information
+  - Full type hints and comprehensive docstring
+
+- **`get_gpu_info()`**: GPU information retrieval function
+  - Detects NVIDIA GPU availability using nvidia-smi
+  - Returns device name, memory (total/used/free), driver version
+  - Supports multi-GPU environments
+  - Safe to call in environments without GPU
+  - Essential for verifying Colab GPU runtime is enabled
+  - Full type hints and comprehensive docstring
+
+- **`get_memory_info()`**: System memory information function
+  - Retrieves RAM usage from /proc/meminfo on Linux
+  - Returns total, available, used memory with formatted strings
+  - Calculates memory usage percentage
+  - Cross-platform fallback for non-Linux systems
+  - Useful for monitoring memory in long-running notebooks
+  - Full type hints and comprehensive docstring
+
+#### Testing
+- Added 20 new tests for the three new functions (38 total)
+  - 8 tests for `format_file_size()`: zero, bytes, KB, MB, GB, negative, invalid type, float
+  - 6 tests for `get_gpu_info()`: return type, keys, nvidia-smi not found, timeout, GPU parsing
+  - 6 tests for `get_memory_info()`: return type, keys, /proc/meminfo unavailable, non-Linux
+
+#### Documentation
+- Updated README.md with:
+  - New function descriptions and usage examples
+  - Updated test count (38 tests)
+  - Enhanced Colab usage examples including GPU and memory checks
+- Updated demonstration in `__main__` block
+
+### Changed
+- Import statement updated to include `subprocess` module
+- Type hints enhanced with `Union[int, float]` for `format_file_size`
+
+### Technical Details
+- All new functions use only Python standard library
+- Consistent error handling patterns with existing code
+- Test patterns match existing unittest/pytest style
+- No breaking changes to existing API
+
+### Files Changed
+- `colab_utils.py` (UPDATED): Added 3 new functions (+260 lines)
+- `tests/test_colab_utils.py` (UPDATED): Added 20 new tests (+152 lines)
+- `README.md` (UPDATED): Added documentation for new functions (+75 lines)
+- `CHANGELOG.md` (UPDATED): Added v0.2.0 release notes
+
+### Commit Information
+- Commit: fa41841
+- Tag: v0.2.0
+- Date: 2026-01-05
+
+---
+
+## Release Notes for GitHub Release (v0.2.0)
+
+### 🚀 v0.2.0 - System Monitoring Utilities
+
+New utility functions for GPU and memory monitoring in Google Colab environments.
+
+**New Features:**
+- 📏 `format_file_size()` - Convert bytes to human-readable format
+- 🎮 `get_gpu_info()` - Check GPU availability and specifications
+- 💾 `get_memory_info()` - Monitor system RAM usage
+
+**Highlights:**
+- ✅ 38 comprehensive tests (20 new, all passing)
+- 📝 Full type hints and docstrings
+- 🛡️ Robust error handling for edge cases
+- 🚀 Standard library only (no new dependencies)
+
+**Quick Start:**
+```python
+from colab_utils import format_file_size, get_gpu_info, get_memory_info
+
+# Check GPU
+gpu = get_gpu_info()
+if gpu['available']:
+    print(f"GPU: {gpu['devices'][0]['name']}")
+
+# Check memory
+mem = get_memory_info()
+print(f"Available: {mem['available_formatted']}")
+
+# Format sizes
+print(format_file_size(1073741824))  # "1.00 GB"
+```
+
+**Test Command:**
+```bash
+pip install -r requirements.txt
+python -m pytest tests/ -v
+```
+
+See [README.md](README.md) for detailed usage instructions.
+
+---
+
+**Generated with** [Claude Code](https://claude.com/claude-code)
+
+---
+
 ## [0.1.0] - 2026-01-04
 
 ### Added
